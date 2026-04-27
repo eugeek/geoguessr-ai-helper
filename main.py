@@ -1,4 +1,3 @@
-import asyncio
 import threading
 import sys
 from config import HOTKEY
@@ -6,6 +5,7 @@ from capture import capture_screen
 from analyzer import analyze
 from overlay import create_window, show_result, reset_button
 import logging
+import asyncio
 import webview
 
 logging.basicConfig(
@@ -16,11 +16,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_loop = None
 _processing = False
 
 
-async def process_screenshot() -> None:
+def process_screenshot() -> None:
     global _processing
 
     if _processing:
@@ -33,15 +32,13 @@ async def process_screenshot() -> None:
         image_bytes = capture_screen()
 
         logger.info("Analysis started")
-        result = await analyze(image_bytes)
+        result = asyncio.run(analyze(image_bytes))
 
-        print(f"[✓] {result.country} ({result.confidence}%) at {result.lat:.6f}, {result.lon:.6f}")
         logger.info(f"Analysis complete: {result.country} ({result.confidence}%) at {result.lat:.6f}, {result.lon:.6f}")
 
         show_result(result)
 
     except Exception as e:
-        print(f"[✗] Error: {e}")
         logger.error(f"Error: {e}")
     finally:
         _processing = False
@@ -49,7 +46,7 @@ async def process_screenshot() -> None:
 
 
 def trigger_analyze():
-    asyncio.run_coroutine_threadsafe(process_screenshot(), _loop)
+    threading.Thread(target=process_screenshot, daemon=True).start()
 
 
 def setup_hotkey():
@@ -98,9 +95,6 @@ def main() -> None:
         sys.exit(1)
 
     print(f"GeoGuessr Helper started. Hotkey: {HOTKEY}")
-
-    _loop = asyncio.new_event_loop()
-    threading.Thread(target=_loop.run_forever, daemon=True).start()
 
     try:
         setup_hotkey()
