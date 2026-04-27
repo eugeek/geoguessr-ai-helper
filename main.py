@@ -3,7 +3,7 @@ import sys
 from config import HOTKEY
 from capture import capture_screen
 from analyzer import analyze
-from overlay import create_window, show_result, reset_button
+from overlay import create_window, show_result, reset_button, hide, show
 import logging
 import asyncio
 import webview
@@ -28,8 +28,13 @@ def process_screenshot() -> None:
     _processing = True
 
     try:
+        hide()
+        import time
+        time.sleep(0.2)
+
         logger.info("Screenshot capture started")
         image_bytes = capture_screen()
+        show()
 
         logger.info("Analysis started")
         result = asyncio.run(analyze(image_bytes))

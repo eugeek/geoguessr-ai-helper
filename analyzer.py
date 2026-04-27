@@ -2,7 +2,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 import google.generativeai as genai
-from config import GEMINI_API_KEY
+from config import GEMINI_API_KEY, MODEL
 
 
 @dataclass
@@ -43,7 +43,7 @@ Where:
 async def analyze(image_bytes: bytes) -> GeoResult:
     """Send image to Gemini and get location analysis."""
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-2.5-flash-lite")
+    model = genai.GenerativeModel(MODEL)
 
     try:
         response = await asyncio.to_thread(

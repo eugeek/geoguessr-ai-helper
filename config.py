@@ -10,6 +10,7 @@ load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 HOTKEY = os.getenv("HOTKEY", "ctrl+alt+g")
+MODEL = os.getenv("MODEL", "gemini-2.5-flash-lite")
 
 if not GEMINI_API_KEY or GEMINI_API_KEY.startswith("your_"):
     from setup_ui import setup_api_key
