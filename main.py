@@ -88,8 +88,6 @@ def setup_hotkey():
 
 
 def main() -> None:
-    global _loop
-
     if sys.platform != "win32":
         print("❌ This app is Windows-only.")
         sys.exit(1)
