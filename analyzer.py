@@ -43,7 +43,7 @@ Where:
 async def analyze(image_bytes: bytes) -> GeoResult:
     """Send image to Gemini and get location analysis."""
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-3.1-flash-lite")
+    model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
     try:
         response = await asyncio.to_thread(
