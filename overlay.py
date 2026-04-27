@@ -1,25 +1,17 @@
 import threading
 import tkinter as tk
-from tkinter import Label, Frame
+from tkinter import Label, Frame, Button
 from PIL import Image, ImageTk
 from io import BytesIO
 import sys
+import urllib.request
 import logging
-import folium
-import tempfile
-import os
 from analyzer import GeoResult
 
 logger = logging.getLogger(__name__)
 
 _overlay_window = None
 _last_screenshot = None
-
-try:
-    from tkinterweb import HtmlFrame
-    HAS_TKINTERWEB = True
-except ImportError:
-    HAS_TKINTERWEB = False
 
 
 def set_last_screenshot(image_bytes):
@@ -28,32 +20,25 @@ def set_last_screenshot(image_bytes):
     _last_screenshot = image_bytes
 
 
-def create_interactive_map(lat: float, lon: float) -> str:
-    """Create interactive Folium map and return HTML file path."""
+def fetch_static_map(lat: float, lon: float, zoom: int = 13) -> bytes:
+    """Fetch OpenStreetMap static map image with marker."""
     try:
-        m = folium.Map(
-            location=[lat, lon],
-            zoom_start=13,
-            tiles="OpenStreetMap",
+        static_url = (
+            f"https://staticmap.openstreetmap.de/staticmap.php"
+            f"?center={lat},{lon}&zoom={zoom}"
+            f"&size=400x300&maptype=mapnik"
+            f"&markers={lat},{lon},lightblue"
         )
 
-        folium.Marker(
-            location=[lat, lon],
-            popup=f"📍 {lat:.6f}, {lon:.6f}",
-            icon=folium.Icon(color="red", icon="location-dot"),
-        ).add_to(m)
-
-        temp_dir = tempfile.gettempdir()
-        map_file = os.path.join(temp_dir, "geoguessr_map.html")
-        m.save(map_file)
-        return map_file
+        with urllib.request.urlopen(static_url, timeout=5) as response:
+            return response.read()
     except Exception as e:
-        logger.error(f"Failed to create map: {e}")
+        logger.error(f"Failed to fetch map image: {e}")
         return None
 
 
-def show_result(result: GeoResult, button_window=None) -> None:
-    """Display result in overlay window with interactive map."""
+def show_result(result: GeoResult) -> None:
+    """Display result in overlay window with map."""
     if sys.platform != "win32":
         return
 
@@ -125,38 +110,100 @@ def show_result(result: GeoResult, button_window=None) -> None:
             except Exception as e:
                 logger.warning(f"Screenshot preview error: {e}")
 
-        # Map frame
-        map_container = Frame(content, bg="#2a2a2a", relief="sunken", bd=2)
+        # Map frame with zoom controls
+        map_container = Frame(content, bg="#1a1a1a")
         map_container.pack(fill="both", expand=True, pady=5)
 
-        # Create map
-        map_file = create_interactive_map(result.lat, result.lon)
-        if map_file and HAS_TKINTERWEB:
+        # Zoom controls
+        zoom_controls = Frame(map_container, bg="#1a1a1a")
+        zoom_controls.pack(fill="x", padx=5, pady=3)
+
+        zoom_state = {"zoom": 13}
+
+        zoom_label = Label(
+            zoom_controls,
+            text=f"Zoom: {zoom_state['zoom']}",
+            font=("Arial", 8),
+            bg="#1a1a1a",
+            fg="#7f8c8d",
+        )
+        zoom_label.pack(side="left")
+
+        def update_map(zoom_delta):
+            zoom_state["zoom"] = max(2, min(18, zoom_state["zoom"] + zoom_delta))
+            zoom_label.config(text=f"Zoom: {zoom_state['zoom']}")
+
+            map_img_bytes = fetch_static_map(result.lat, result.lon, zoom=zoom_state["zoom"])
+            if map_img_bytes:
+                try:
+                    map_img = Image.open(BytesIO(map_img_bytes))
+                    map_photo = ImageTk.PhotoImage(map_img)
+                    map_display.config(image=map_photo)
+                    map_display.image = map_photo
+                except Exception as e:
+                    logger.error(f"Map update error: {e}")
+
+        btn_zoom_in = Button(
+            zoom_controls,
+            text="+ Zoom In",
+            command=lambda: update_map(1),
+            bg="#34495e",
+            fg="white",
+            font=("Arial", 8),
+            padx=8,
+            pady=2,
+        )
+        btn_zoom_in.pack(side="right", padx=2)
+
+        btn_zoom_out = Button(
+            zoom_controls,
+            text="- Zoom Out",
+            command=lambda: update_map(-1),
+            bg="#34495e",
+            fg="white",
+            font=("Arial", 8),
+            padx=8,
+            pady=2,
+        )
+        btn_zoom_out.pack(side="right", padx=2)
+
+        # Map image
+        map_img_bytes = fetch_static_map(result.lat, result.lon, zoom=zoom_state["zoom"])
+        if map_img_bytes:
             try:
-                html_frame = HtmlFrame(map_container, horizontal_scrollbar="auto")
-                html_frame.load_file(map_file)
-                html_frame.pack(fill="both", expand=True)
-            except Exception as e:
-                logger.error(f"Map embed error: {e}")
-                map_label = Label(
-                    map_container,
-                    text=f"🗺️ Map coordinates:\n{result.lat:.6f}, {result.lon:.6f}",
-                    font=("Arial", 11),
+                map_img = Image.open(BytesIO(map_img_bytes))
+                map_photo = ImageTk.PhotoImage(map_img)
+
+                map_frame = Frame(map_container, bg="#2a2a2a", relief="sunken", bd=2)
+                map_frame.pack(fill="both", expand=True, pady=2)
+
+                map_display = Label(
+                    map_frame,
+                    image=map_photo,
                     bg="#2a2a2a",
-                    fg="#bdc3c7",
-                    justify="center",
                 )
-                map_label.pack(fill="both", expand=True)
+                map_display.image = map_photo
+                map_display.pack(padx=5, pady=5)
+            except Exception as e:
+                logger.error(f"Map rendering error: {e}")
+                map_error = Label(
+                    map_container,
+                    text="🗺️ Map failed to load",
+                    font=("Arial", 10),
+                    bg="#34495e",
+                    fg="#e74c3c",
+                )
+                map_error.pack(fill="both", expand=True)
         else:
-            map_label = Label(
+            map_error = Label(
                 map_container,
-                text=f"🗺️ Map coordinates:\n{result.lat:.6f}, {result.lon:.6f}",
-                font=("Arial", 11),
-                bg="#2a2a2a",
-                fg="#bdc3c7",
-                justify="center",
+                text="🗺️ Could not load map",
+                font=("Arial", 10),
+                bg="#34495e",
+                fg="#e74c3c",
+                pady=40,
             )
-            map_label.pack(fill="both", expand=True)
+            map_error.pack(fill="both", expand=True, pady=2)
 
         # Analysis text
         analysis_frame = Frame(content, bg="#2a2a2a", relief="sunken", bd=1)
