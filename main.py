@@ -4,12 +4,13 @@ from config import HOTKEY
 from capture import capture_screen
 from analyzer import analyze
 from overlay import create_window, show_result, reset_button, hide, show
+from config import APP_DATA
 import logging
 import asyncio
 import webview
 
 logging.basicConfig(
-    filename="geoguessr_analysis.log",
+    filename=str(APP_DATA / "geoguessr.log"),
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     datefmt="%H:%M:%S",

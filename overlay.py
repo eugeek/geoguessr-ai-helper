@@ -122,9 +122,10 @@ class GeoApi:
 
     def save_settings(self, api_key: str, model: str) -> bool:
         try:
-            env_path = ".env"
+            from config import ENV_FILE
+            env_path = ENV_FILE
             lines = []
-            if os.path.exists(env_path):
+            if env_path.exists():
                 with open(env_path) as f:
                     lines = f.readlines()
 
@@ -178,7 +179,7 @@ def show_result(result: GeoResult):
     explanation = result.explanation.replace("'", "\\'").replace("\n", " ")
     js = f"""
     document.getElementById('title').innerText = '📍 {country} · {result.confidence}%';
-    document.getElementById('coords').innerText = '{result.lat:.6f}, {result.lon:.6f}';
+    document.getElementById('coords').innerText = '{result.lat:.6f}, {result.lon:.6f} · ↑{result.tokens_in} ↓{result.tokens_out} tok';
     document.getElementById('content').innerHTML = '<iframe src=\\"{maps_url}\\" style=\\"width:100%;height:100%;border:none;\\" allowfullscreen></iframe>';
     """
     try:

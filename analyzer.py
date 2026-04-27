@@ -12,6 +12,8 @@ class GeoResult:
     country: str
     confidence: int
     explanation: str
+    tokens_in: int = 0
+    tokens_out: int = 0
 
 
 SYSTEM_PROMPT = """You are an expert GeoGuessr analyst. Your task is to analyze a screenshot and determine the location.
@@ -63,12 +65,18 @@ async def analyze(image_bytes: bytes) -> GeoResult:
 
         data = json.loads(text)
 
+        usage = getattr(response, "usage_metadata", None)
+        tokens_in = getattr(usage, "prompt_token_count", 0) or 0
+        tokens_out = getattr(usage, "candidates_token_count", 0) or 0
+
         return GeoResult(
             lat=float(data["lat"]),
             lon=float(data["lon"]),
             country=str(data["country"]),
             confidence=int(data["confidence"]),
             explanation=str(data["explanation"]),
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
         )
 
     except json.JSONDecodeError as e:
