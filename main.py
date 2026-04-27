@@ -4,8 +4,19 @@ import sys
 from config import HOTKEY
 from capture import capture_screen
 from analyzer import analyze
-from overlay import show_result
+from overlay import show_result, set_last_screenshot
 from button import FloatingButton
+import logging
+from datetime import datetime
+
+# Setup logging
+logging.basicConfig(
+    filename="geoguessr_analysis.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 _loop = None
 _loop_thread = None
@@ -24,16 +35,28 @@ async def process_screenshot() -> None:
 
     try:
         print("[►] Capturing full screen...")
+        logger.info("Screenshot capture started")
         image_bytes = capture_screen()
+        set_last_screenshot(image_bytes)
 
-        print("[◌] Analyzing...")
+        print("[◌] Analyzing with Gemini...")
+        logger.info("Analysis started")
         result = await analyze(image_bytes)
 
         print(f"[✓] {result.country} (confidence: {result.confidence}%)")
+        print(f"    Location: {result.lat:.6f}, {result.lon:.6f}")
+        print(f"    {result.explanation}\n")
+
+        logger.info(
+            f"Analysis complete: {result.country} "
+            f"({result.confidence}%) at {result.lat:.6f}, {result.lon:.6f}"
+        )
+
         show_result(result)
 
     except Exception as e:
         print(f"[✗] Error: {e}")
+        logger.error(f"Error during analysis: {str(e)}")
     finally:
         _processing = False
 

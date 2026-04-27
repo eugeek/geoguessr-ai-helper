@@ -1,26 +1,30 @@
 import threading
-import webbrowser
+import tkinter as tk
+from tkinter import Label, Frame
+from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
 import sys
 from analyzer import GeoResult
 
-_overlay_thread = None
 _overlay_window = None
+_last_screenshot = None
+
+
+def set_last_screenshot(image_bytes):
+    """Store last screenshot for display."""
+    global _last_screenshot
+    _last_screenshot = image_bytes
 
 
 def show_result(result: GeoResult) -> None:
-    """Display floating overlay with Google Maps marker and location info."""
+    """Display overlay with map marker, result, and screenshot."""
     if sys.platform != "win32":
         return
 
-    global _overlay_thread, _overlay_window
-
-    maps_url = f"https://www.google.com/maps/@{result.lat},{result.lon},15z?markers={result.lat},{result.lon}"
+    global _overlay_window
 
     def create_overlay():
         global _overlay_window
-
-        import tkinter as tk
-        from tkinter import Label, Frame
 
         # Close existing window
         if _overlay_window and _overlay_window.winfo_exists():
@@ -28,82 +32,119 @@ def show_result(result: GeoResult) -> None:
 
         _overlay_window = tk.Tk()
         _overlay_window.title(f"{result.country} · {result.confidence}%")
-        _overlay_window.geometry("600x400")
+        _overlay_window.geometry("700x600")
         _overlay_window.attributes("-topmost", True)
         _overlay_window.attributes("-toolwindow", True)
+        _overlay_window.configure(bg="#1a1a1a")
 
-        # Position in bottom-right
+        # Position bottom-right
         _overlay_window.update_idletasks()
         screen_width = _overlay_window.winfo_screenwidth()
         screen_height = _overlay_window.winfo_screenheight()
-        x = screen_width - 620
-        y = screen_height - 420
-        _overlay_window.geometry(f"600x400+{x}+{y}")
+        x = screen_width - 720
+        y = screen_height - 620
+        _overlay_window.geometry(f"700x600+{x}+{y}")
 
-        # Main frame
-        main_frame = Frame(_overlay_window, bg="#ffffff")
-        main_frame.pack(fill="both", expand=True)
+        # Header
+        header = Frame(_overlay_window, bg="#2c3e50", height=50)
+        header.pack(fill="x")
 
-        # Title section
-        title_frame = Frame(main_frame, bg="#2c3e50", height=40)
-        title_frame.pack(fill="x")
-
-        title_label = Label(
-            title_frame,
-            text=f"{result.country} · {result.confidence}%",
-            font=("Arial", 12, "bold"),
+        title = Label(
+            header,
+            text=f"📍 {result.country} · {result.confidence}%",
+            font=("Arial", 14, "bold"),
             bg="#2c3e50",
             fg="white",
         )
-        title_label.pack(anchor="w", padx=12, pady=8)
+        title.pack(side="left", padx=15, pady=10)
 
-        # Map area (opens Maps in browser on click)
-        map_frame = Frame(main_frame, bg="#ecf0f1", height=250)
-        map_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        coords = Label(
+            header,
+            text=f"{result.lat:.4f}, {result.lon:.4f}",
+            font=("Arial", 10),
+            bg="#2c3e50",
+            fg="#bdc3c7",
+        )
+        coords.pack(side="right", padx=15, pady=10)
 
-        map_info = Label(
+        # Main content
+        content = Frame(_overlay_window, bg="#1a1a1a")
+        content.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Screenshot preview
+        if _last_screenshot:
+            try:
+                img = Image.open(BytesIO(_last_screenshot))
+                # Resize for preview (max 300x200)
+                img.thumbnail((300, 200), Image.Resampling.LANCZOS)
+                screenshot_tk = tk.PhotoImage(image=img)
+
+                screenshot_label = Label(
+                    content,
+                    image=screenshot_tk,
+                    bg="#2a2a2a",
+                    bd=2,
+                    relief="sunken",
+                )
+                screenshot_label.image = screenshot_tk
+                screenshot_label.pack(pady=5)
+            except Exception as e:
+                error_label = Label(
+                    content,
+                    text=f"[Screenshot preview error: {str(e)[:30]}]",
+                    font=("Arial", 8),
+                    bg="#2a2a2a",
+                    fg="#e74c3c",
+                )
+                error_label.pack(pady=5)
+
+        # Map info with marker
+        map_frame = Frame(content, bg="#34495e", relief="sunken", bd=1)
+        map_frame.pack(fill="both", expand=True, pady=5)
+
+        map_label = Label(
             map_frame,
-            text=f"📍 {result.lat:.4f}, {result.lon:.4f}\n\nClick here to open in Google Maps",
-            font=("Arial", 11),
-            bg="#ecf0f1",
-            fg="#34495e",
-            cursor="hand2",
+            text=f"📍 Map: {result.lat:.6f}, {result.lon:.6f}",
+            font=("Arial", 11, "bold"),
+            bg="#34495e",
+            fg="#ecf0f1",
+            pady=20,
         )
-        map_info.pack(fill="both", expand=True)
+        map_label.pack()
 
-        def open_maps(event=None):
-            webbrowser.open(maps_url)
+        # Analysis text
+        analysis_frame = Frame(content, bg="#2a2a2a", relief="sunken", bd=1)
+        analysis_frame.pack(fill="x", pady=5)
 
-        map_info.bind("<Button-1>", open_maps)
-
-        # Info section
-        info_frame = Frame(main_frame, bg="#f8f9fa")
-        info_frame.pack(fill="x", padx=10, pady=10)
-
-        explanation_label = Label(
-            info_frame,
-            text=f"Analysis: {result.explanation}",
+        analysis_label = Label(
+            analysis_frame,
+            text=result.explanation,
             font=("Arial", 9),
-            bg="#f8f9fa",
-            fg="#555555",
-            wraplength=570,
+            bg="#2a2a2a",
+            fg="#bdc3c7",
+            wraplength=660,
             justify="left",
+            padx=10,
+            pady=8,
         )
-        explanation_label.pack(anchor="w", pady=5)
+        analysis_label.pack(fill="both")
 
-        coords_label = Label(
-            info_frame,
-            text=f"Coordinates: {result.lat:.6f}, {result.lon:.6f}",
+        # Footer with timestamp
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        footer = Frame(_overlay_window, bg="#1a1a1a")
+        footer.pack(fill="x", padx=10, pady=5)
+
+        footer_label = Label(
+            footer,
+            text=f"✓ Analysis complete at {timestamp}",
             font=("Arial", 8),
-            bg="#f8f9fa",
-            fg="#888888",
+            bg="#1a1a1a",
+            fg="#7f8c8d",
         )
-        coords_label.pack(anchor="w")
-
-        # Auto-open Maps in background
-        webbrowser.open(maps_url)
+        footer_label.pack(side="left")
 
         _overlay_window.mainloop()
 
-    _overlay_thread = threading.Thread(target=create_overlay, daemon=True)
-    _overlay_thread.start()
+    thread = threading.Thread(target=create_overlay, daemon=True)
+    thread.start()
