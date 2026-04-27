@@ -4,3 +4,5 @@ Pillow==10.1.0
 mss==9.0.1
 pynput==1.7.6
 pywin32==306; sys_platform == 'win32'
+folium==0.14.0
+tkinterweb==3.13.18
