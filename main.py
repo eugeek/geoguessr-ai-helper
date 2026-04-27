@@ -59,6 +59,8 @@ async def process_screenshot() -> None:
         logger.error(f"Error during analysis: {str(e)}")
     finally:
         _processing = False
+        if _floating_button:
+            _floating_button.set_loading(False)
 
 
 def run_event_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -129,6 +131,7 @@ def main() -> None:
 
     # Start floating button
     def button_callback():
+        _floating_button.set_loading(True)
         asyncio.run_coroutine_threadsafe(process_screenshot(), _loop)
 
     _floating_button = FloatingButton(button_callback)

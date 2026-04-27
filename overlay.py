@@ -1,13 +1,18 @@
 import threading
 import tkinter as tk
-from tkinter import Label, Frame
-from PIL import Image, ImageDraw, ImageFont
+from tkinter import Label, Frame, Button
+from PIL import Image, ImageTk
 from io import BytesIO
 import sys
+import urllib.request
+import logging
 from analyzer import GeoResult
+
+logger = logging.getLogger(__name__)
 
 _overlay_window = None
 _last_screenshot = None
+_current_zoom = 10
 
 
 def set_last_screenshot(image_bytes):
@@ -16,15 +21,34 @@ def set_last_screenshot(image_bytes):
     _last_screenshot = image_bytes
 
 
+def fetch_static_map(lat: float, lon: float, zoom: int = 15) -> bytes:
+    """Fetch Google Static Map image with marker."""
+    try:
+        url = (
+            f"https://maps.geoapify.com/v1/staticmap"
+            f"?style=osm-bright&width=400&height=300"
+            f"&center=lonlat:{lon},{lat}&zoom={zoom}"
+            f"&marker=lonlat:{lon},{lat};color:%23ff0000"
+        )
+
+        with urllib.request.urlopen(url, timeout=5) as response:
+            return response.read()
+    except Exception as e:
+        logger.error(f"Failed to fetch map image: {e}")
+        return None
+
+
 def show_result(result: GeoResult) -> None:
     """Display overlay with map marker, result, and screenshot."""
     if sys.platform != "win32":
         return
 
-    global _overlay_window
+    global _overlay_window, _current_zoom
 
     def create_overlay():
-        global _overlay_window
+        global _overlay_window, _current_zoom
+
+        _current_zoom = 10
 
         # Close existing window
         if _overlay_window and _overlay_window.winfo_exists():
@@ -32,7 +56,7 @@ def show_result(result: GeoResult) -> None:
 
         _overlay_window = tk.Tk()
         _overlay_window.title(f"{result.country} · {result.confidence}%")
-        _overlay_window.geometry("700x600")
+        _overlay_window.geometry("750x650")
         _overlay_window.attributes("-topmost", True)
         _overlay_window.attributes("-toolwindow", True)
         _overlay_window.configure(bg="#1a1a1a")
@@ -41,9 +65,9 @@ def show_result(result: GeoResult) -> None:
         _overlay_window.update_idletasks()
         screen_width = _overlay_window.winfo_screenwidth()
         screen_height = _overlay_window.winfo_screenheight()
-        x = screen_width - 720
-        y = screen_height - 620
-        _overlay_window.geometry(f"700x600+{x}+{y}")
+        x = screen_width - 770
+        y = screen_height - 670
+        _overlay_window.geometry(f"750x650+{x}+{y}")
 
         # Header
         header = Frame(_overlay_window, bg="#2c3e50", height=50)
@@ -71,61 +95,127 @@ def show_result(result: GeoResult) -> None:
         content = Frame(_overlay_window, bg="#1a1a1a")
         content.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Screenshot preview
+        # Screenshot preview (top)
         if _last_screenshot:
             try:
                 img = Image.open(BytesIO(_last_screenshot))
-                # Resize for preview (max 300x200)
-                img.thumbnail((300, 200), Image.Resampling.LANCZOS)
-                screenshot_tk = tk.PhotoImage(image=img)
+                img.thumbnail((350, 180), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+
+                screenshot_frame = Frame(content, bg="#2a2a2a", relief="sunken", bd=1)
+                screenshot_frame.pack(pady=5)
 
                 screenshot_label = Label(
-                    content,
-                    image=screenshot_tk,
+                    screenshot_frame,
+                    image=photo,
                     bg="#2a2a2a",
-                    bd=2,
-                    relief="sunken",
                 )
-                screenshot_label.image = screenshot_tk
-                screenshot_label.pack(pady=5)
+                screenshot_label.image = photo
+                screenshot_label.pack(padx=5, pady=5)
             except Exception as e:
-                error_label = Label(
-                    content,
-                    text=f"[Screenshot preview error: {str(e)[:30]}]",
-                    font=("Arial", 8),
-                    bg="#2a2a2a",
-                    fg="#e74c3c",
-                )
-                error_label.pack(pady=5)
+                logger.warning(f"Screenshot preview error: {e}")
 
-        # Map info with marker
-        map_frame = Frame(content, bg="#34495e", relief="sunken", bd=1)
-        map_frame.pack(fill="both", expand=True, pady=5)
+        # Map container with zoom buttons
+        map_container = Frame(content, bg="#1a1a1a")
+        map_container.pack(fill="both", expand=True, pady=5)
 
-        map_label = Label(
-            map_frame,
-            text=f"📍 Map: {result.lat:.6f}, {result.lon:.6f}",
-            font=("Arial", 11, "bold"),
-            bg="#34495e",
-            fg="#ecf0f1",
-            pady=20,
+        # Zoom controls (top-right)
+        zoom_controls = Frame(map_container, bg="#1a1a1a")
+        zoom_controls.pack(fill="x", padx=5, pady=3)
+
+        zoom_label = Label(
+            zoom_controls,
+            text=f"Zoom: {_current_zoom}",
+            font=("Arial", 8),
+            bg="#1a1a1a",
+            fg="#7f8c8d",
         )
-        map_label.pack()
+        zoom_label.pack(side="left")
 
-        # Analysis text
+        zoom_state = {"zoom": _current_zoom}
+
+        def update_map(zoom_delta):
+            zoom_state["zoom"] = max(2, min(18, zoom_state["zoom"] + zoom_delta))
+            zoom_label.config(text=f"Zoom: {zoom_state['zoom']}")
+
+            map_img_bytes = fetch_static_map(result.lat, result.lon, zoom=zoom_state["zoom"])
+            if map_img_bytes:
+                try:
+                    map_img = Image.open(BytesIO(map_img_bytes))
+                    map_photo = ImageTk.PhotoImage(map_img)
+                    map_display.config(image=map_photo)
+                    map_display.image = map_photo
+                except Exception as e:
+                    logger.error(f"Map update error: {e}")
+
+        btn_zoom_in = Button(
+            zoom_controls,
+            text="+ Zoom In",
+            command=lambda: update_map(1),
+            bg="#34495e",
+            fg="white",
+            font=("Arial", 8),
+            padx=8,
+            pady=2,
+        )
+        btn_zoom_in.pack(side="right", padx=2)
+
+        btn_zoom_out = Button(
+            zoom_controls,
+            text="- Zoom Out",
+            command=lambda: update_map(-1),
+            bg="#34495e",
+            fg="white",
+            font=("Arial", 8),
+            padx=8,
+            pady=2,
+        )
+        btn_zoom_out.pack(side="right", padx=2)
+
+        # Map image (center)
+        map_img_bytes = fetch_static_map(result.lat, result.lon, zoom=_current_zoom)
+        if map_img_bytes:
+            try:
+                map_img = Image.open(BytesIO(map_img_bytes))
+                map_photo = ImageTk.PhotoImage(map_img)
+
+                map_frame = Frame(map_container, bg="#2a2a2a", relief="sunken", bd=2)
+                map_frame.pack(fill="both", expand=True, pady=2)
+
+                map_display = Label(
+                    map_frame,
+                    image=map_photo,
+                    bg="#2a2a2a",
+                )
+                map_display.image = map_photo
+                map_display.pack(padx=5, pady=5)
+            except Exception as e:
+                logger.error(f"Map rendering error: {e}")
+        else:
+            map_error = Label(
+                map_container,
+                text="🗺️ Could not load map",
+                font=("Arial", 10),
+                bg="#34495e",
+                fg="#e74c3c",
+                pady=40,
+            )
+            map_error.pack(fill="both", expand=True, pady=2)
+
+        # Analysis text (bottom)
         analysis_frame = Frame(content, bg="#2a2a2a", relief="sunken", bd=1)
         analysis_frame.pack(fill="x", pady=5)
 
         analysis_label = Label(
             analysis_frame,
             text=result.explanation,
-            font=("Arial", 9),
+            font=("Arial", 8),
             bg="#2a2a2a",
             fg="#bdc3c7",
-            wraplength=660,
+            wraplength=720,
             justify="left",
-            padx=10,
-            pady=8,
+            padx=8,
+            pady=6,
         )
         analysis_label.pack(fill="both")
 
