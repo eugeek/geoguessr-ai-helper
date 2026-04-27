@@ -2,6 +2,9 @@
 
 Windows overlay that uses Gemini AI to analyze your GeoGuessr screenshot and show the detected location on Google Maps.
 
+![screenshot](docs/screenshot2.png)
+![screenshot](docs/screenshot1.jpeg)
+
 ## Usage
 
 1. Download `GeoGuessr-Helper.exe` from [Releases](../../releases)
