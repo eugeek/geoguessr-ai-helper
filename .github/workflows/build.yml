@@ -28,7 +28,14 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --name="GeoGuessr-Helper" main.py
+          pyinstaller --onefile --windowed ^
+            --hidden-import=PIL ^
+            --hidden-import=dotenv ^
+            --hidden-import=google.generativeai ^
+            --hidden-import=folium ^
+            --hidden-import=tkinterweb ^
+            --name="GeoGuessr-Helper" ^
+            main.py
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v1
