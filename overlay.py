@@ -20,19 +20,44 @@ def set_last_screenshot(image_bytes):
     _last_screenshot = image_bytes
 
 
-def fetch_static_map(lat: float, lon: float, zoom: int = 13) -> bytes:
-    """Fetch OpenStreetMap static map image with marker."""
-    try:
-        static_url = (
-            f"https://staticmap.openstreetmap.de/staticmap.php"
-            f"?center={lat},{lon}&zoom={zoom}"
-            f"&size=400x300&maptype=mapnik"
-            f"&markers={lat},{lon},lightblue"
-        )
+def _deg2tile(lat: float, lon: float, zoom: int):
+    import math
+    n = 2 ** zoom
+    x = int((lon + 180) / 360 * n)
+    y = int((1 - math.log(math.tan(math.radians(lat)) + 1 / math.cos(math.radians(lat))) / math.pi) / 2 * n)
+    return x, y
 
-        req = urllib.request.Request(static_url, headers={"User-Agent": "GeoGuessr-Helper/1.0"})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            return response.read()
+
+def fetch_static_map(lat: float, lon: float, zoom: int = 13) -> bytes:
+    """Fetch map by stitching OSM tiles into a 3x3 grid."""
+    try:
+        from PIL import Image as PILImage
+        from io import BytesIO
+
+        cx, cy = _deg2tile(lat, lon, zoom)
+        tile_size = 256
+        grid = 3
+        result = PILImage.new("RGB", (tile_size * grid, tile_size * grid))
+
+        for dx in range(grid):
+            for dy in range(grid):
+                tx, ty = cx - 1 + dx, cy - 1 + dy
+                url = f"https://tile.openstreetmap.org/{zoom}/{tx}/{ty}.png"
+                req = urllib.request.Request(url, headers={"User-Agent": "GeoGuessr-Helper/1.0"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    tile = PILImage.open(BytesIO(resp.read())).convert("RGB")
+                result.paste(tile, (dx * tile_size, dy * tile_size))
+
+        # Draw marker dot
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(result)
+        center = (tile_size * grid // 2, tile_size * grid // 2)
+        r = 8
+        draw.ellipse([center[0]-r, center[1]-r, center[0]+r, center[1]+r], fill="red", outline="white", width=2)
+
+        buf = BytesIO()
+        result.save(buf, format="PNG")
+        return buf.getvalue()
     except Exception as e:
         logger.error(f"Failed to fetch map image: {e}")
         return None
