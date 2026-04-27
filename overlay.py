@@ -1,227 +1,123 @@
 import threading
-import tkinter as tk
-from tkinter import Label, Frame, Button
-from PIL import Image
-from io import BytesIO
-import sys
-import urllib.request
+import time
 import logging
 from analyzer import GeoResult
-import tempfile
-import os
 
 logger = logging.getLogger(__name__)
 
-_overlay_window = None
-_last_screenshot = None
+_window = None
+
+INITIAL_HTML = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a1a; display: flex; flex-direction: column; height: 100vh; font-family: Arial, sans-serif; color: white; }
+    #header { background: #2c3e50; padding: 15px 20px; display: flex; align-items: center; justify-content: space-between; }
+    #title { font-size: 16px; font-weight: bold; }
+    #btn { background: #27ae60; border: none; color: white; padding: 10px 20px; font-size: 14px; border-radius: 6px; cursor: pointer; }
+    #btn:hover { background: #2ecc71; }
+    #btn:disabled { background: #7f8c8d; cursor: default; }
+    #content { flex: 1; display: flex; align-items: center; justify-content: center; color: #7f8c8d; font-size: 16px; }
+</style>
+</head>
+<body>
+    <div id="header">
+        <span id="title">GeoGuessr Helper</span>
+        <button id="btn" onclick="analyze()">📍 Analyze</button>
+    </div>
+    <div id="content">Press Analyze to detect location</div>
+    <script>
+        function analyze() {
+            document.getElementById('btn').disabled = true;
+            document.getElementById('btn').innerText = '⏳ Analyzing...';
+            pywebview.api.analyze();
+        }
+    </script>
+</body>
+</html>"""
+
+INJECT_BUTTON_JS = """
+(function() {
+    var old = document.getElementById('_geo_btn');
+    if (old) old.remove();
+    var btn = document.createElement('button');
+    btn.id = '_geo_btn';
+    btn.innerText = '📍 Analyze';
+    btn.style.cssText = [
+        'position:fixed', 'top:15px', 'right:15px', 'z-index:2147483647',
+        'background:#27ae60', 'color:white', 'border:none',
+        'padding:10px 18px', 'font-size:14px', 'font-weight:bold',
+        'border-radius:8px', 'cursor:pointer',
+        'box-shadow:0 2px 12px rgba(0,0,0,0.4)',
+        'font-family:Arial,sans-serif'
+    ].join(';');
+    btn.onmouseover = function() { this.style.background='#2ecc71'; };
+    btn.onmouseout = function() { this.style.background='#27ae60'; };
+    btn.onclick = function() {
+        this.innerText = '⏳ Analyzing...';
+        this.disabled = true;
+        pywebview.api.analyze();
+    };
+    document.body.appendChild(btn);
+})();
+"""
+
+RESET_BUTTON_JS = """
+var b = document.getElementById('_geo_btn');
+if (b) { b.disabled = false; b.innerText = '📍 Analyze'; }
+"""
 
 
-def set_last_screenshot(image_bytes):
-    """Store last screenshot for display."""
-    global _last_screenshot
-    _last_screenshot = image_bytes
+class GeoApi:
+    def __init__(self, callback):
+        self._callback = callback
+
+    def analyze(self):
+        threading.Thread(target=self._callback, daemon=True).start()
 
 
-def _deg2tile(lat: float, lon: float, zoom: int):
-    import math
-    n = 2 ** zoom
-    x = int((lon + 180) / 360 * n)
-    y = int((1 - math.log(math.tan(math.radians(lat)) + 1 / math.cos(math.radians(lat))) / math.pi) / 2 * n)
-    return x, y
+def create_window(analyze_callback):
+    global _window
+    import webview
+    api = GeoApi(analyze_callback)
+    _window = webview.create_window(
+        "GeoGuessr Helper",
+        html=INITIAL_HTML,
+        js_api=api,
+        width=520,
+        height=700,
+        on_top=True,
+        x=20,
+        y=20,
+        resizable=True,
+    )
+    return _window
 
 
-def fetch_static_map(lat: float, lon: float, zoom: int = 13) -> bytes:
-    """Fetch map by stitching OSM tiles into a 3x3 grid."""
-    try:
-        from PIL import Image as PILImage
-        from io import BytesIO
-
-        cx, cy = _deg2tile(lat, lon, zoom)
-        tile_size = 256
-        grid = 3
-        result = PILImage.new("RGB", (tile_size * grid, tile_size * grid))
-
-        for dx in range(grid):
-            for dy in range(grid):
-                tx, ty = cx - 1 + dx, cy - 1 + dy
-                url = f"https://tile.openstreetmap.org/{zoom}/{tx}/{ty}.png"
-                req = urllib.request.Request(url, headers={"User-Agent": "GeoGuessr-Helper/1.0"})
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    tile = PILImage.open(BytesIO(resp.read())).convert("RGB")
-                result.paste(tile, (dx * tile_size, dy * tile_size))
-
-        # Draw marker dot
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(result)
-        center = (tile_size * grid // 2, tile_size * grid // 2)
-        r = 8
-        draw.ellipse([center[0]-r, center[1]-r, center[0]+r, center[1]+r], fill="red", outline="white", width=2)
-
-        buf = BytesIO()
-        result.save(buf, format="PNG")
-        return buf.getvalue()
-    except Exception as e:
-        logger.error(f"Failed to fetch map image: {e}")
-        return None
-
-
-def show_result(result: GeoResult) -> None:
-    """Display result in overlay window with map."""
-    if sys.platform != "win32":
+def show_result(result: GeoResult):
+    global _window
+    if not _window:
         return
+    maps_url = f"https://www.google.com/maps/@{result.lat},{result.lon},15z"
+    _window.load_url(maps_url)
 
-    global _overlay_window
+    def inject():
+        time.sleep(3)
+        try:
+            _window.evaluate_js(INJECT_BUTTON_JS)
+        except Exception as e:
+            logger.error(f"Button inject error: {e}")
 
-    def create_overlay():
-        global _overlay_window
+    threading.Thread(target=inject, daemon=True).start()
 
-        if _overlay_window and _overlay_window.winfo_exists():
-            _overlay_window.destroy()
 
-        _overlay_window = tk.Tk()
-        _overlay_window.title(f"{result.country} · {result.confidence}%")
-        _overlay_window.geometry("800x700")
-        _overlay_window.attributes("-topmost", True)
-        _overlay_window.attributes("-toolwindow", True)
-        _overlay_window.configure(bg="#1a1a1a")
-
-        _overlay_window.update_idletasks()
-        screen_width = _overlay_window.winfo_screenwidth()
-        screen_height = _overlay_window.winfo_screenheight()
-        x = screen_width - 820
-        y = screen_height - 720
-        _overlay_window.geometry(f"800x700+{x}+{y}")
-
-        # Header
-        header = Frame(_overlay_window, bg="#2c3e50", height=50)
-        header.pack(fill="x")
-
-        title = Label(
-            header,
-            text=f"📍 {result.country} · {result.confidence}%",
-            font=("Arial", 14, "bold"),
-            bg="#2c3e50",
-            fg="white",
-        )
-        title.pack(side="left", padx=15, pady=10)
-
-        coords = Label(
-            header,
-            text=f"{result.lat:.4f}, {result.lon:.4f}",
-            font=("Arial", 10),
-            bg="#2c3e50",
-            fg="#bdc3c7",
-        )
-        coords.pack(side="right", padx=15, pady=10)
-
-        # Main content
-        content = Frame(_overlay_window, bg="#1a1a1a")
-        content.pack(fill="both", expand=True, padx=10, pady=10)
-
-        # Map frame with zoom controls
-        map_container = Frame(content, bg="#1a1a1a")
-        map_container.pack(fill="both", expand=True, pady=5)
-
-        # Zoom controls
-        zoom_controls = Frame(map_container, bg="#1a1a1a")
-        zoom_controls.pack(fill="x", padx=5, pady=3)
-
-        zoom_state = {"zoom": 13}
-
-        zoom_label = Label(
-            zoom_controls,
-            text=f"Zoom: {zoom_state['zoom']}",
-            font=("Arial", 8),
-            bg="#1a1a1a",
-            fg="#7f8c8d",
-        )
-        zoom_label.pack(side="left")
-
-        btn_zoom_in = Button(
-            zoom_controls,
-            text="+ Zoom In",
-            command=lambda: update_map(1),
-            bg="#34495e",
-            fg="white",
-            font=("Arial", 8),
-            padx=8,
-            pady=2,
-        )
-        btn_zoom_in.pack(side="right", padx=2)
-
-        btn_zoom_out = Button(
-            zoom_controls,
-            text="- Zoom Out",
-            command=lambda: update_map(-1),
-            bg="#34495e",
-            fg="white",
-            font=("Arial", 8),
-            padx=8,
-            pady=2,
-        )
-        btn_zoom_out.pack(side="right", padx=2)
-
-        map_frame = Frame(map_container, bg="#2a2a2a", relief="sunken", bd=2)
-        map_frame.pack(fill="both", expand=True, pady=2)
-
-        map_display = Label(map_frame, bg="#2a2a2a", text="Loading map...", fg="#7f8c8d")
-        map_display.pack(fill="both", expand=True)
-
-        map_tmp = os.path.join(tempfile.gettempdir(), "geoguessr_map_tile.ppm")
-
-        def load_map(zoom):
-            map_img_bytes = fetch_static_map(result.lat, result.lon, zoom=zoom)
-            if map_img_bytes:
-                try:
-                    img = Image.open(BytesIO(map_img_bytes))
-                    img.convert("RGB").save(map_tmp, format="PPM")
-                    photo = tk.PhotoImage(file=map_tmp)
-                    map_display.config(image=photo, text="")
-                    map_display.image = photo
-                except Exception as e:
-                    logger.error(f"Map rendering error: {e}")
-                    map_display.config(text="🗺️ Map failed to load", image="")
-
-        def update_map(zoom_delta):
-            zoom_state["zoom"] = max(2, min(18, zoom_state["zoom"] + zoom_delta))
-            zoom_label.config(text=f"Zoom: {zoom_state['zoom']}")
-            _overlay_window.after(0, lambda: load_map(zoom_state["zoom"]))
-
-        _overlay_window.after(0, lambda: load_map(zoom_state["zoom"]))
-
-        # Analysis text
-        analysis_frame = Frame(content, bg="#2a2a2a", relief="sunken", bd=1)
-        analysis_frame.pack(fill="x", pady=5)
-
-        analysis_label = Label(
-            analysis_frame,
-            text=result.explanation,
-            font=("Arial", 8),
-            bg="#2a2a2a",
-            fg="#bdc3c7",
-            wraplength=770,
-            justify="left",
-            padx=8,
-            pady=6,
-        )
-        analysis_label.pack(fill="both")
-
-        # Footer
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        footer = Frame(_overlay_window, bg="#1a1a1a")
-        footer.pack(fill="x", padx=10, pady=5)
-
-        footer_label = Label(
-            footer,
-            text=f"✓ Analysis complete at {timestamp}",
-            font=("Arial", 8),
-            bg="#1a1a1a",
-            fg="#7f8c8d",
-        )
-        footer_label.pack(side="left")
-
-        _overlay_window.mainloop()
-
-    thread = threading.Thread(target=create_overlay, daemon=True)
-    thread.start()
+def reset_button():
+    global _window
+    if not _window:
+        return
+    try:
+        _window.evaluate_js(RESET_BUTTON_JS)
+    except Exception:
+        pass

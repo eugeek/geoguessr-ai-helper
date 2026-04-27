@@ -4,12 +4,10 @@ import sys
 from config import HOTKEY
 from capture import capture_screen
 from analyzer import analyze
-from overlay import show_result, set_last_screenshot
-from button import FloatingButton
+from overlay import create_window, show_result, reset_button
 import logging
-from datetime import datetime
+import webview
 
-# Setup logging
 logging.basicConfig(
     filename="geoguessr_analysis.log",
     level=logging.INFO,
@@ -19,13 +17,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _loop = None
-_loop_thread = None
 _processing = False
-_floating_button = None
 
 
 async def process_screenshot() -> None:
-    """Capture, analyze, and display result."""
     global _processing
 
     if _processing:
@@ -34,43 +29,30 @@ async def process_screenshot() -> None:
     _processing = True
 
     try:
-        print("[►] Capturing full screen...")
         logger.info("Screenshot capture started")
         image_bytes = capture_screen()
-        set_last_screenshot(image_bytes)
 
-        print("[◌] Analyzing with Gemini...")
         logger.info("Analysis started")
         result = await analyze(image_bytes)
 
-        print(f"[✓] {result.country} (confidence: {result.confidence}%)")
-        print(f"    Location: {result.lat:.6f}, {result.lon:.6f}")
-        print(f"    {result.explanation}\n")
-
-        logger.info(
-            f"Analysis complete: {result.country} "
-            f"({result.confidence}%) at {result.lat:.6f}, {result.lon:.6f}"
-        )
+        print(f"[✓] {result.country} ({result.confidence}%) at {result.lat:.6f}, {result.lon:.6f}")
+        logger.info(f"Analysis complete: {result.country} ({result.confidence}%) at {result.lat:.6f}, {result.lon:.6f}")
 
         show_result(result)
 
     except Exception as e:
         print(f"[✗] Error: {e}")
-        logger.error(f"Error during analysis: {str(e)}")
+        logger.error(f"Error: {e}")
     finally:
         _processing = False
-        if _floating_button:
-            _floating_button.set_loading(False)
+        reset_button()
 
 
-def run_event_loop(loop: asyncio.AbstractEventLoop) -> None:
-    """Run asyncio event loop in background thread."""
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
+def trigger_analyze():
+    asyncio.run_coroutine_threadsafe(process_screenshot(), _loop)
 
 
-def setup_hotkey_listener_windows() -> None:
-    """Windows: Setup global hotkey using pynput."""
+def setup_hotkey():
     from pynput import keyboard
 
     parts = HOTKEY.lower().split("+")
@@ -90,69 +72,43 @@ def setup_hotkey_listener_windows() -> None:
         else:
             key = part
 
-    pressed_keys = set()
+    pressed = set()
 
-    def on_press(kb_key):
+    def on_press(k):
         try:
-            if kb_key in modifiers:
-                pressed_keys.add(kb_key)
-            elif hasattr(kb_key, "char") and kb_key.char == key:
-                if modifiers.issubset(pressed_keys):
-                    asyncio.run_coroutine_threadsafe(process_screenshot(), _loop)
+            if k in modifiers:
+                pressed.add(k)
+            elif hasattr(k, "char") and k.char == key:
+                if modifiers.issubset(pressed):
+                    trigger_analyze()
         except (AttributeError, TypeError):
             pass
 
-    def on_release(kb_key):
-        try:
-            pressed_keys.discard(kb_key)
-        except (AttributeError, TypeError):
-            pass
+    def on_release(k):
+        pressed.discard(k)
 
-    listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-    listener.start()
+    keyboard.Listener(on_press=on_press, on_release=on_release).start()
 
 
 def main() -> None:
-    """Start floating button and async event loop."""
-    global _loop, _loop_thread, _floating_button
+    global _loop
 
     if sys.platform != "win32":
         print("❌ This app is Windows-only.")
         sys.exit(1)
 
-    print("GeoGuessr Helper started")
-    print(f"✓ Floating button in top-left corner")
-    print(f"✓ Also works with hotkey: {HOTKEY}\n")
+    print(f"GeoGuessr Helper started. Hotkey: {HOTKEY}")
 
-    # Start event loop in background thread
     _loop = asyncio.new_event_loop()
-    _loop_thread = threading.Thread(target=run_event_loop, args=(_loop,), daemon=True)
-    _loop_thread.start()
+    threading.Thread(target=_loop.run_forever, daemon=True).start()
 
-    # Start floating button
-    def button_callback():
-        _floating_button.set_loading(True)
-        asyncio.run_coroutine_threadsafe(process_screenshot(), _loop)
-
-    _floating_button = FloatingButton(button_callback)
-    _floating_button.start()
-
-    # Also setup hotkey as backup
     try:
-        setup_hotkey_listener_windows()
+        setup_hotkey()
     except Exception as e:
         print(f"⚠ Hotkey setup failed: {e}")
 
-    try:
-        # Keep main thread alive
-        while True:
-            threading.Event().wait(1)
-    except KeyboardInterrupt:
-        print("\nExiting...")
-        if _floating_button:
-            _floating_button.destroy()
-        _loop.call_soon_threadsafe(_loop.stop)
-        sys.exit(0)
+    create_window(trigger_analyze)
+    webview.start()
 
 
 if __name__ == "__main__":
