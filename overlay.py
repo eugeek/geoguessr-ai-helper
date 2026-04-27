@@ -30,7 +30,8 @@ def fetch_static_map(lat: float, lon: float, zoom: int = 13) -> bytes:
             f"&markers={lat},{lon},lightblue"
         )
 
-        with urllib.request.urlopen(static_url, timeout=5) as response:
+        req = urllib.request.Request(static_url, headers={"User-Agent": "GeoGuessr-Helper/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as response:
             return response.read()
     except Exception as e:
         logger.error(f"Failed to fetch map image: {e}")
@@ -89,26 +90,6 @@ def show_result(result: GeoResult) -> None:
         # Main content
         content = Frame(_overlay_window, bg="#1a1a1a")
         content.pack(fill="both", expand=True, padx=10, pady=10)
-
-        # Screenshot preview
-        if _last_screenshot:
-            try:
-                img = Image.open(BytesIO(_last_screenshot))
-                img.thumbnail((350, 180), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
-
-                screenshot_frame = Frame(content, bg="#2a2a2a", relief="sunken", bd=1)
-                screenshot_frame.pack(pady=5)
-
-                screenshot_label = Label(
-                    screenshot_frame,
-                    image=photo,
-                    bg="#2a2a2a",
-                )
-                screenshot_label.image = photo
-                screenshot_label.pack(padx=5, pady=5)
-            except Exception as e:
-                logger.warning(f"Screenshot preview error: {e}")
 
         # Map frame with zoom controls
         map_container = Frame(content, bg="#1a1a1a")
