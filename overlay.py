@@ -167,14 +167,14 @@ def show_result(result: GeoResult) -> None:
         map_display = Label(map_frame, bg="#2a2a2a", text="Loading map...", fg="#7f8c8d")
         map_display.pack(fill="both", expand=True)
 
-        map_tmp = os.path.join(tempfile.gettempdir(), "geoguessr_map_tile.png")
+        map_tmp = os.path.join(tempfile.gettempdir(), "geoguessr_map_tile.ppm")
 
         def load_map(zoom):
             map_img_bytes = fetch_static_map(result.lat, result.lon, zoom=zoom)
             if map_img_bytes:
                 try:
                     img = Image.open(BytesIO(map_img_bytes))
-                    img.save(map_tmp)
+                    img.convert("RGB").save(map_tmp, format="PPM")
                     photo = tk.PhotoImage(file=map_tmp)
                     map_display.config(image=photo, text="")
                     map_display.image = photo
