@@ -1,12 +1,13 @@
 import threading
 import tkinter as tk
 from tkinter import Label, Frame, Button
-from PIL import Image, ImageTk
+from PIL import Image
 from io import BytesIO
 import sys
 import urllib.request
 import logging
 from analyzer import GeoResult
+from config import APP_DATA
 
 logger = logging.getLogger(__name__)
 
@@ -135,20 +136,6 @@ def show_result(result: GeoResult) -> None:
         )
         zoom_label.pack(side="left")
 
-        def update_map(zoom_delta):
-            zoom_state["zoom"] = max(2, min(18, zoom_state["zoom"] + zoom_delta))
-            zoom_label.config(text=f"Zoom: {zoom_state['zoom']}")
-
-            map_img_bytes = fetch_static_map(result.lat, result.lon, zoom=zoom_state["zoom"])
-            if map_img_bytes:
-                try:
-                    map_img = Image.open(BytesIO(map_img_bytes))
-                    map_photo = ImageTk.PhotoImage(map_img)
-                    map_display.config(image=map_photo)
-                    map_display.image = map_photo
-                except Exception as e:
-                    logger.error(f"Map update error: {e}")
-
         btn_zoom_in = Button(
             zoom_controls,
             text="+ Zoom In",
@@ -173,43 +160,33 @@ def show_result(result: GeoResult) -> None:
         )
         btn_zoom_out.pack(side="right", padx=2)
 
-        # Map image
-        map_img_bytes = fetch_static_map(result.lat, result.lon, zoom=zoom_state["zoom"])
-        if map_img_bytes:
-            try:
-                map_img = Image.open(BytesIO(map_img_bytes))
-                map_photo = ImageTk.PhotoImage(map_img)
+        map_frame = Frame(map_container, bg="#2a2a2a", relief="sunken", bd=2)
+        map_frame.pack(fill="both", expand=True, pady=2)
 
-                map_frame = Frame(map_container, bg="#2a2a2a", relief="sunken", bd=2)
-                map_frame.pack(fill="both", expand=True, pady=2)
+        map_display = Label(map_frame, bg="#2a2a2a", text="Loading map...", fg="#7f8c8d")
+        map_display.pack(fill="both", expand=True)
 
-                map_display = Label(
-                    map_frame,
-                    image=map_photo,
-                    bg="#2a2a2a",
-                )
-                map_display.image = map_photo
-                map_display.pack(padx=5, pady=5)
-            except Exception as e:
-                logger.error(f"Map rendering error: {e}")
-                map_error = Label(
-                    map_container,
-                    text="🗺️ Map failed to load",
-                    font=("Arial", 10),
-                    bg="#34495e",
-                    fg="#e74c3c",
-                )
-                map_error.pack(fill="both", expand=True)
-        else:
-            map_error = Label(
-                map_container,
-                text="🗺️ Could not load map",
-                font=("Arial", 10),
-                bg="#34495e",
-                fg="#e74c3c",
-                pady=40,
-            )
-            map_error.pack(fill="both", expand=True, pady=2)
+        map_tmp = APP_DATA / "map_tile.png"
+
+        def load_map(zoom):
+            map_img_bytes = fetch_static_map(result.lat, result.lon, zoom=zoom)
+            if map_img_bytes:
+                try:
+                    img = Image.open(BytesIO(map_img_bytes))
+                    img.save(str(map_tmp))
+                    photo = tk.PhotoImage(file=str(map_tmp))
+                    map_display.config(image=photo, text="")
+                    map_display.image = photo
+                except Exception as e:
+                    logger.error(f"Map rendering error: {e}")
+                    map_display.config(text="🗺️ Map failed to load", image="")
+
+        def update_map(zoom_delta):
+            zoom_state["zoom"] = max(2, min(18, zoom_state["zoom"] + zoom_delta))
+            zoom_label.config(text=f"Zoom: {zoom_state['zoom']}")
+            _overlay_window.after(0, lambda: load_map(zoom_state["zoom"]))
+
+        _overlay_window.after(0, lambda: load_map(zoom_state["zoom"]))
 
         # Analysis text
         analysis_frame = Frame(content, bg="#2a2a2a", relief="sunken", bd=1)
