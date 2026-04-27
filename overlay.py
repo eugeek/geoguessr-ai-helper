@@ -7,7 +7,8 @@ import sys
 import urllib.request
 import logging
 from analyzer import GeoResult
-from config import APP_DATA
+import tempfile
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -166,15 +167,15 @@ def show_result(result: GeoResult) -> None:
         map_display = Label(map_frame, bg="#2a2a2a", text="Loading map...", fg="#7f8c8d")
         map_display.pack(fill="both", expand=True)
 
-        map_tmp = APP_DATA / "map_tile.png"
+        map_tmp = os.path.join(tempfile.gettempdir(), "geoguessr_map_tile.png")
 
         def load_map(zoom):
             map_img_bytes = fetch_static_map(result.lat, result.lon, zoom=zoom)
             if map_img_bytes:
                 try:
                     img = Image.open(BytesIO(map_img_bytes))
-                    img.save(str(map_tmp))
-                    photo = tk.PhotoImage(file=str(map_tmp))
+                    img.save(map_tmp)
+                    photo = tk.PhotoImage(file=map_tmp)
                     map_display.config(image=photo, text="")
                     map_display.image = photo
                 except Exception as e:
