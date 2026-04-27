@@ -191,7 +191,7 @@ def show_result(result: GeoResult):
     global _window
     if not _window:
         return
-    maps_url = f"https://www.google.com/maps?q={result.lat},{result.lon}&z=14"
+    maps_url = f"https://maps.google.com/maps?q={result.lat},{result.lon}&z=14&output=embed"
     _window.load_url(maps_url)
 
     def inject():
