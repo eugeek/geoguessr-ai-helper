@@ -1,5 +1,4 @@
 import threading
-import time
 import logging
 import os
 from analyzer import GeoResult
@@ -104,26 +103,9 @@ INITIAL_HTML = """<!DOCTYPE html>
 </body>
 </html>"""
 
-INJECT_BUTTON_JS = """
-(function() {
-    var old = document.getElementById('_geo_btn');
-    if (old) old.remove();
-    var btn = document.createElement('button');
-    btn.id = '_geo_btn';
-    btn.innerText = '📍 Analyze';
-    btn.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;background:#27ae60;color:white;border:none;padding:8px 16px;font-size:13px;font-weight:bold;border-radius:6px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,0.4);font-family:Arial,sans-serif;';
-    btn.onclick = function() {
-        this.innerText = '⏳ Analyzing...';
-        this.disabled = true;
-        pywebview.api.analyze();
-    };
-    document.body.appendChild(btn);
-})();
-"""
-
 RESET_BUTTON_JS = """
-var b = document.getElementById('_geo_btn');
-if (b) { b.disabled = false; b.innerText = '📍 Analyze'; }
+document.getElementById('btn').disabled = false;
+document.getElementById('btn').innerText = '📍 Analyze';
 """
 
 
@@ -192,16 +174,17 @@ def show_result(result: GeoResult):
     if not _window:
         return
     maps_url = f"https://maps.google.com/maps?q={result.lat},{result.lon}&z=14&output=embed"
-    _window.load_url(maps_url)
-
-    def inject():
-        time.sleep(3)
-        try:
-            _window.evaluate_js(INJECT_BUTTON_JS)
-        except Exception as e:
-            logger.error(f"Button inject error: {e}")
-
-    threading.Thread(target=inject, daemon=True).start()
+    country = result.country.replace("'", "\\'")
+    explanation = result.explanation.replace("'", "\\'").replace("\n", " ")
+    js = f"""
+    document.getElementById('title').innerText = '📍 {country} · {result.confidence}%';
+    document.getElementById('coords').innerText = '{result.lat:.6f}, {result.lon:.6f}';
+    document.getElementById('content').innerHTML = '<iframe src=\\"{maps_url}\\" style=\\"width:100%;height:100%;border:none;\\" allowfullscreen></iframe>';
+    """
+    try:
+        _window.evaluate_js(js)
+    except Exception as e:
+        logger.error(f"JS error: {e}")
 
 
 def reset_button():
